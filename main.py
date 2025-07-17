@@ -30,8 +30,28 @@ class SmartTrafficLightSystem:
         # System state
         self.current_traffic_light_state = "GREEN"  # GREEN, YELLOW, RED
         self.frame_count = 0
+        self.zebra_setup_done = False
         
         print("System initialized successfully!")
+    
+    def setup_zebra_crossing(self, video_path):
+        """Setup zebra crossing if not already configured."""
+        if not self.homography.zebra_configured:
+            print("Zebra crossing not configured. Starting interactive setup...")
+            
+            # Get first frame for setup
+            cap = cv2.VideoCapture(video_path)
+            ret, frame = cap.read()
+            cap.release()
+            
+            if ret:
+                self.homography.setup_zebra_crossing_interactive(frame)
+                self.zebra_setup_done = True
+            else:
+                print("Could not read video for zebra crossing setup")
+        else:
+            print("Zebra crossing already configured")
+            self.zebra_setup_done = True
     
     def process_frame(self, frame):
         """Process a single video frame through the complete pipeline."""
@@ -72,6 +92,8 @@ class SmartTrafficLightSystem:
         # Add safety status overlay
         safety_status = pipeline_result['safety_result']['status']
         risk_level = pipeline_result['safety_result']['risk_level']
+        pedestrians_in_crossing = pipeline_result['safety_result'].get('pedestrians_in_crossing', 0)
+        vehicles_near_crossing = pipeline_result['safety_result'].get('vehicles_near_crossing', 0)
         
         # Choose color based on safety status
         if safety_status == SafetyStatus.SAFE:
@@ -81,26 +103,32 @@ class SmartTrafficLightSystem:
         else:  # DANGER
             status_color = (0, 0, 255)  # Red
         
-        # Add safety status text
-        cv2.rectangle(annotated_frame, (10, 10), (400, 100), (0, 0, 0), -1)
+        # Larger safety status panel
+        cv2.rectangle(annotated_frame, (10, 10), (500, 160), (0, 0, 0), -1)
         cv2.putText(annotated_frame, f"Safety: {safety_status.value}", 
                    (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
         cv2.putText(annotated_frame, f"Risk Level: {risk_level:.2f}", 
                    (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # Add pedestrian and vehicle counts
+        cv2.putText(annotated_frame, f"Pedestrians in crossing: {pedestrians_in_crossing}", 
+                   (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(annotated_frame, f"Vehicles near crossing: {vehicles_near_crossing}", 
+                   (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
         # Add traffic light state
         light_color = (0, 255, 0) if self.current_traffic_light_state == "GREEN" else \
                      (0, 255, 255) if self.current_traffic_light_state == "YELLOW" else \
                      (0, 0, 255)
         cv2.putText(annotated_frame, f"Light: {self.current_traffic_light_state}", 
-                   (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, light_color, 2)
+                   (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.6, light_color, 2)
         
         # Add object count with bigger, more visible text
         object_counts = {}
         for class_name in pipeline_result['detections']['class_names']:
             object_counts[class_name] = object_counts.get(class_name, 0) + 1
         
-        y_offset = 120
+        y_offset = 180
         for class_name, count in object_counts.items():
             cv2.putText(annotated_frame, f"{class_name}: {count}", 
                        (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
@@ -223,13 +251,37 @@ def main():
     model_name = "yolo11x.pt"  # Use the most accurate model
     confidence_threshold = 0.3
     
+    print("Smart Traffic Light System")
+    print("=" * 50)
+    print("ACVSS25 Hackathon Project - SafeCrossing")
+    print("=" * 50)
+    print(f"Input video: {video_path}")
+    print(f"Model: {model_name}")
+    print(f"Confidence threshold: {confidence_threshold}")
+    print("=" * 50)
+    
     # Initialize system
     system = SmartTrafficLightSystem(
         model_name=model_name,
         confidence_threshold=confidence_threshold
     )
     
+    # Setup zebra crossing (interactive if not configured)
+    print("\nChecking zebra crossing configuration...")
+    system.setup_zebra_crossing(video_path)
+    
+    if not system.zebra_setup_done:
+        print("Zebra crossing setup was not completed. Continuing with basic projection.")
+    else:
+        print("Zebra crossing configured successfully!")
+    
     # Run video processing
+    print("\nStarting video processing...")
+    print("Controls:")
+    print("  'q' - Quit")
+    print("  'p' - Pause/Resume")
+    print("=" * 50)
+    
     system.run_video_processing(video_path)
 
 
