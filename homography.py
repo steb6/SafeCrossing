@@ -21,9 +21,6 @@ class HomographyProjector:
         self.road_points = []   # Additional road reference points for better alignment
         self.zebra_configured = False
         
-        # Load existing configuration if available
-        self.load_zebra_config()
-        
         # Define top-view zebra crossing coordinates (destination) - centered
         canvas_center_x = self.topview_size[1] // 2  # 400
         canvas_center_y = self.topview_size[0] // 2  # 300
@@ -37,13 +34,16 @@ class HomographyProjector:
             [canvas_center_x - zebra_width//2, canvas_center_y + zebra_height//2]   # Bottom-left
         ], dtype=np.float32)
         
-        # Additional reference points for road alignment (top-view coordinates)
+        # Road reference points mapped to full canvas corners
         self.topview_road_refs = np.array([
-            [50, 100],   # Left road edge, far
-            [750, 100],  # Right road edge, far
-            [50, 500],   # Left road edge, near
-            [750, 500]   # Right road edge, near
+            [0, 0],                                    # Left road edge, far → top-left corner
+            [self.topview_size[1], 0],                # Right road edge, far → top-right corner
+            [0, self.topview_size[0]],                # Left road edge, near → bottom-left corner
+            [self.topview_size[1], self.topview_size[0]]  # Right road edge, near → bottom-right corner
         ], dtype=np.float32)
+        
+        # Load existing configuration after all attributes are initialized
+        self.load_zebra_config()
     
     def save_zebra_config(self):
         """Save zebra crossing and road reference configuration to file."""
@@ -66,8 +66,11 @@ class HomographyProjector:
                 self.road_points = config.get('road_points', [])
                 self.zebra_configured = config.get('zebra_configured', False)
                 if self.zebra_configured and len(self.zebra_points) == 4 and len(self.road_points) == 4:
-                    self.compute_homography()
+                    self.compute_homography_enhanced()
                     print(f"Loaded configuration from {self.config_file}")
+                elif self.zebra_configured and len(self.zebra_points) == 4:
+                    self.compute_homography()
+                    print(f"Loaded basic configuration from {self.config_file}")
             except Exception as e:
                 print(f"Error loading configuration: {e}")
     
@@ -190,17 +193,14 @@ class HomographyProjector:
             print(f"Point {len(self.zebra_points)}: ({x}, {y})")
     
     def compute_homography_enhanced(self):
-        """Compute homography matrix using both zebra crossing and road reference points."""
-        if len(self.zebra_points) == 4 and len(self.road_points) == 4:
-            # Combine all source points
-            all_src_points = np.array(self.zebra_points + self.road_points, dtype=np.float32)
+        """Compute homography matrix using only road reference points for better alignment."""
+        if len(self.road_points) == 4:
+            # Use only road reference points for homography computation
+            road_src_points = np.array(self.road_points, dtype=np.float32)
             
-            # Combine destination points (zebra + road reference points)
-            all_dst_points = np.vstack([self.topview_zebra_rect, self.topview_road_refs])
-            
-            # Use findHomography for more robust estimation with more points
-            self.homography_matrix, _ = cv2.findHomography(all_src_points, all_dst_points, cv2.RANSAC)
-            print("Enhanced homography matrix computed successfully using 8 points")
+            # Map road edges to full canvas corners for maximum accuracy
+            self.homography_matrix = cv2.getPerspectiveTransform(road_src_points, self.topview_road_refs)
+            print("Enhanced homography matrix computed using 4 road reference points")
             return True
         return False
     
@@ -212,6 +212,33 @@ class HomographyProjector:
             print("Homography matrix computed successfully")
             return True
         return False
+    
+    def get_zebra_crossing_bounds(self):
+        """Get zebra crossing bounds in top-view coordinates for safety analysis."""
+        if not self.zebra_configured or len(self.zebra_points) != 4:
+            return None
+            
+        if self.homography_matrix is not None:
+            # Project the actual zebra crossing points to top-view
+            zebra_src_points = np.array(self.zebra_points, dtype=np.float32)
+            zebra_projected = cv2.perspectiveTransform(zebra_src_points.reshape(-1, 1, 2), self.homography_matrix)
+            zebra_rect = zebra_projected.reshape(-1, 2)
+            
+            # Check if projected zebra crossing is within reasonable bounds
+            x_coords = zebra_rect[:, 0]
+            y_coords = zebra_rect[:, 1]
+            
+            # Only return projected bounds if they're within the canvas area (with some margin)
+            if (min(x_coords) >= -100 and max(x_coords) <= self.topview_size[1] + 100 and
+                min(y_coords) >= -100 and max(y_coords) <= self.topview_size[0] + 100):
+                
+                # Return bounding box of the projected zebra crossing
+                return (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
+        
+        # Fallback to default centered zebra crossing bounds
+        zebra_rect = self.topview_zebra_rect
+        return (min(zebra_rect[:, 0]), min(zebra_rect[:, 1]), 
+                max(zebra_rect[:, 0]), max(zebra_rect[:, 1]))
     
     def project_detections_to_topview(self, detections):
         """Project detections using homography transformation."""
@@ -248,38 +275,105 @@ class HomographyProjector:
         # Create blank canvas for top view
         topview_img = np.zeros((self.topview_size[0], self.topview_size[1], 3), dtype=np.uint8)
         
-        # Draw road background
+        # Define areas for complete street visualization
+        sidewalk_width = 30  # Width of sidewalk areas
         road_margin = 50
-        cv2.rectangle(topview_img, 
-                     (road_margin, road_margin), 
-                     (self.topview_size[1] - road_margin, self.topview_size[0] - road_margin),
-                     (80, 80, 80), -1)  # Gray road
         
-        # Draw zebra crossing if configured
-        if self.zebra_configured:
-            # Draw zebra crossing as white stripes
-            zebra_rect = self.topview_zebra_rect.astype(int)
-            cv2.fillPoly(topview_img, [zebra_rect], (200, 200, 200))  # Light gray base
+        # Draw sidewalks first (light gray background for entire area)
+        cv2.rectangle(topview_img, (0, 0), (self.topview_size[1], self.topview_size[0]), (120, 120, 120), -1)  # Light gray sidewalks
+        
+        # Draw left sidewalk area (darker gray)
+        cv2.rectangle(topview_img, 
+                     (0, 0), 
+                     (road_margin + sidewalk_width, self.topview_size[0]),
+                     (100, 100, 100), -1)  # Darker gray for left sidewalk
+        
+        # Draw right sidewalk area (darker gray)
+        cv2.rectangle(topview_img, 
+                     (self.topview_size[1] - road_margin - sidewalk_width, 0), 
+                     (self.topview_size[1], self.topview_size[0]),
+                     (100, 100, 100), -1)  # Darker gray for right sidewalk
+        
+        # Draw main road area
+        cv2.rectangle(topview_img, 
+                     (road_margin + sidewalk_width, road_margin), 
+                     (self.topview_size[1] - road_margin - sidewalk_width, self.topview_size[0] - road_margin),
+                     (60, 60, 60), -1)  # Darker gray road
+        
+        # Add sidewalk labels
+        cv2.putText(topview_img, "SIDEWALK", (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(topview_img, "SIDEWALK", (self.topview_size[1] - 80, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Draw zebra crossing if configured - SINGLE zebra crossing only
+        zebra_drawn = False
+        if self.zebra_configured and len(self.zebra_points) == 4:
+            # Try to project zebra crossing points using the homography matrix
+            if self.homography_matrix is not None:
+                zebra_src_points = np.array(self.zebra_points, dtype=np.float32)
+                zebra_projected = cv2.perspectiveTransform(zebra_src_points.reshape(-1, 1, 2), self.homography_matrix)
+                zebra_rect = zebra_projected.reshape(-1, 2).astype(int)
+                
+                # Check if projected zebra crossing is within reasonable bounds
+                x_coords = zebra_rect[:, 0]
+                y_coords = zebra_rect[:, 1]
+                
+                # Only draw projected zebra if it's within the canvas area (with some margin)
+                if (min(x_coords) >= -100 and max(x_coords) <= self.topview_size[1] + 100 and
+                    min(y_coords) >= -100 and max(y_coords) <= self.topview_size[0] + 100):
+                    
+                    # Draw projected zebra crossing as white stripes
+                    cv2.fillPoly(topview_img, [zebra_rect], (200, 200, 200))  # Light gray base
+                    
+                    # Draw zebra stripes
+                    stripe_width = 15
+                    stripe_gap = 10
+                    x_start, x_end = min(zebra_rect[:, 0]), max(zebra_rect[:, 0])
+                    y_start, y_end = min(zebra_rect[:, 1]), max(zebra_rect[:, 1])
+                    
+                    for x in range(x_start, x_end, stripe_width + stripe_gap):
+                        stripe_rect = np.array([
+                            [x, y_start],
+                            [min(x + stripe_width, x_end), y_start],
+                            [min(x + stripe_width, x_end), y_end],
+                            [x, y_end]
+                        ])
+                        cv2.fillPoly(topview_img, [stripe_rect], (255, 255, 255))  # White stripes
+                    
+                    # Add zebra crossing label
+                    label_x = max(0, min(zebra_rect[0, 0], self.topview_size[1] - 150))
+                    label_y = max(20, zebra_rect[0, 1] - 10)
+                    cv2.putText(topview_img, "ZEBRA CROSSING", 
+                               (label_x, label_y), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                    zebra_drawn = True
             
-            # Draw zebra stripes
-            stripe_width = 15
-            stripe_gap = 10
-            x_start, x_end = zebra_rect[0, 0], zebra_rect[1, 0]
-            y_start, y_end = zebra_rect[0, 1], zebra_rect[3, 1]
-            
-            for x in range(x_start, x_end, stripe_width + stripe_gap):
-                stripe_rect = np.array([
-                    [x, y_start],
-                    [min(x + stripe_width, x_end), y_start],
-                    [min(x + stripe_width, x_end), y_end],
-                    [x, y_end]
-                ])
-                cv2.fillPoly(topview_img, [stripe_rect], (255, 255, 255))  # White stripes
-            
-            # Add zebra crossing label
-            cv2.putText(topview_img, "ZEBRA CROSSING", 
-                       (zebra_rect[0, 0], zebra_rect[0, 1] - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+            # Only use fallback if projected zebra was not drawn
+            if not zebra_drawn:
+                # Use fallback centered zebra crossing
+                zebra_rect = self.topview_zebra_rect.astype(int)
+                cv2.fillPoly(topview_img, [zebra_rect], (200, 200, 200))  # Light gray base
+                
+                # Draw zebra stripes
+                stripe_width = 15
+                stripe_gap = 10
+                x_start, x_end = zebra_rect[0, 0], zebra_rect[1, 0]
+                y_start, y_end = zebra_rect[0, 1], zebra_rect[3, 1]
+                
+                for x in range(x_start, x_end, stripe_width + stripe_gap):
+                    stripe_rect = np.array([
+                        [x, y_start],
+                        [min(x + stripe_width, x_end), y_start],
+                        [min(x + stripe_width, x_end), y_end],
+                        [x, y_end]
+                    ])
+                    cv2.fillPoly(topview_img, [stripe_rect], (255, 255, 255))  # White stripes
+                
+                # Add zebra crossing label
+                fallback_reason = "NO HOMOGRAPHY" if self.homography_matrix is None else "OUT OF BOUNDS"
+                cv2.putText(topview_img, f"ZEBRA CROSSING ({fallback_reason})", 
+                           (zebra_rect[0, 0], zebra_rect[0, 1] - 10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 0), 2)
+                zebra_drawn = True
         
         # Draw center line
         center_x = self.topview_size[1] // 2
@@ -307,13 +401,15 @@ class HomographyProjector:
                 # Use direct projected coordinates
                 canvas_x, canvas_y = int(x), int(y)
             else:
-                # Fallback scaling
-                canvas_x = int((x / frame_width) * (self.topview_size[1] - 2 * road_margin)) + road_margin
+                # Fallback scaling including sidewalk areas
+                sidewalk_width = 30
+                total_margin = road_margin + sidewalk_width
+                canvas_x = int((x / frame_width) * (self.topview_size[1] - 2 * total_margin)) + total_margin
                 canvas_y = int((y / frame_height) * (self.topview_size[0] - 2 * road_margin)) + road_margin
             
-            # Ensure coordinates are within bounds
-            canvas_x = max(road_margin, min(self.topview_size[1] - road_margin, canvas_x))
-            canvas_y = max(road_margin, min(self.topview_size[0] - road_margin, canvas_y))
+            # Ensure coordinates are within full canvas bounds (including sidewalks)
+            canvas_x = max(0, min(self.topview_size[1] - 1, canvas_x))
+            canvas_y = max(0, min(self.topview_size[0] - 1, canvas_y))
             
             # Draw object as circle
             cv2.circle(topview_img, (canvas_x, canvas_y), 12, color, -1)
