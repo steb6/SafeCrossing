@@ -33,7 +33,21 @@ class SmartTrafficLightSystem:
         self.frame_count = 0
         self.zebra_setup_done = False
         
+        # Display layout properties for coordinate mapping
+        self.original_frame_width = 0
+        self.combined_frame_width = 0
+        
         print("System initialized successfully!")
+    
+    def handle_mouse_for_homography(self, event, x, y, flags, param):
+        """Handle mouse events with coordinate mapping for the combined display."""
+        # Check if click is within the original frame area (left side)
+        if x < self.original_frame_width:
+            # Pass the coordinates to homography handler (they're already in original frame coordinates)
+            return self.homography.handle_mouse_event(event, x, y, flags, param)
+        else:
+            # Click was in the top-view area (right side), ignore it for homography adjustment
+            return False
     
     def setup_zebra_crossing(self, video_path):
         """Setup zebra crossing if not already configured."""
@@ -101,6 +115,9 @@ class SmartTrafficLightSystem:
             frame, pipeline_result['detections']
         )
         
+        # Add homography reference lines for real-time adjustment
+        annotated_frame = self.homography.draw_reference_lines(annotated_frame)
+        
         # Add safety status overlay
         safety_status = pipeline_result['safety_result']['status']
         risk_level = pipeline_result['safety_result']['risk_level']
@@ -164,6 +181,10 @@ class SmartTrafficLightSystem:
         # Create combined frame with both views
         total_width = frame_width + new_topview_width
         combined_frame = np.zeros((frame_height, total_width, 3), dtype=np.uint8)
+        
+        # Store frame dimensions for coordinate mapping
+        self.original_frame_width = frame_width
+        self.combined_frame_width = total_width
         
         # Place original frame on the left (no stretching)
         combined_frame[:, :frame_width] = annotated_frame
@@ -341,6 +362,7 @@ class SmartTrafficLightSystem:
             
             # Display the frame
             cv2.namedWindow('Smart Traffic Light System', cv2.WINDOW_NORMAL)
+            cv2.setMouseCallback('Smart Traffic Light System', self.handle_mouse_for_homography)
             cv2.imshow('Smart Traffic Light System', combined_frame)
             
             # Handle key presses with proper frame timing
@@ -356,6 +378,16 @@ class SmartTrafficLightSystem:
             elif key == ord('p'):
                 paused = not paused
                 print("Paused" if paused else "Resumed")
+            elif key == ord('a'):
+                # Toggle adjustment mode
+                self.homography.toggle_adjustment_mode()
+            elif key == ord('l'):
+                # Toggle reference lines visibility
+                self.homography.toggle_reference_lines()
+            elif key == ord('s') and self.homography.adjustment_mode:
+                # Manual save configuration
+                self.homography.save_zebra_config()
+                print("Configuration saved manually")
         
         # Cleanup
         cap.release()
@@ -404,6 +436,9 @@ def main():
     print("Controls:")
     print("  'q' - Quit")
     print("  'p' - Pause/Resume")
+    print("  'a' - Toggle adjustment mode (drag points to recalibrate)")
+    print("  'l' - Toggle reference lines visibility")
+    print("  's' - Save configuration (when in adjustment mode)")
     print("=" * 50)
     
     system.run_video_processing(video_path)

@@ -21,6 +21,14 @@ class HomographyProjector:
         self.road_points = []   # Additional road reference points for better alignment
         self.zebra_configured = False
         
+        # Real-time adjustment variables
+        self.show_reference_lines = True
+        self.dragging = False
+        self.drag_point_index = -1
+        self.drag_point_type = ""  # "zebra" or "road"
+        self.drag_threshold = 15  # pixels
+        self.adjustment_mode = False  # Toggle for enabling/disabling adjustments
+        
         # Define top-view zebra crossing coordinates (destination) - centered
         canvas_center_x = self.topview_size[1] // 2  # 400
         canvas_center_y = self.topview_size[0] // 2  # 300
@@ -186,11 +194,161 @@ class HomographyProjector:
                 self.road_points.append([x, y])
                 print(f"Road reference point {len(self.road_points)}: ({x}, {y})")
     
-    def mouse_callback(self, event, x, y, flags, param):
-        """Handle mouse clicks for zebra crossing point selection."""
-        if event == cv2.EVENT_LBUTTONDOWN and len(self.zebra_points) < 4:
-            self.zebra_points.append([x, y])
-            print(f"Point {len(self.zebra_points)}: ({x}, {y})")
+    def toggle_adjustment_mode(self):
+        """Toggle real-time adjustment mode on/off."""
+        self.adjustment_mode = not self.adjustment_mode
+        status = "ENABLED" if self.adjustment_mode else "DISABLED"
+        print(f"Real-time homography adjustment: {status}")
+        return self.adjustment_mode
+    
+    def toggle_reference_lines(self):
+        """Toggle visibility of reference lines."""
+        self.show_reference_lines = not self.show_reference_lines
+        status = "VISIBLE" if self.show_reference_lines else "HIDDEN"
+        print(f"Reference lines: {status}")
+        return self.show_reference_lines
+    
+    def find_nearest_point(self, mouse_x, mouse_y):
+        """Find the nearest draggable point to mouse position."""
+        min_distance = float('inf')
+        nearest_point = None
+        nearest_index = -1
+        nearest_type = ""
+        
+        # Check zebra crossing points
+        for i, point in enumerate(self.zebra_points):
+            distance = np.sqrt((point[0] - mouse_x)**2 + (point[1] - mouse_y)**2)
+            if distance < min_distance and distance <= self.drag_threshold:
+                min_distance = distance
+                nearest_point = point
+                nearest_index = i
+                nearest_type = "zebra"
+        
+        # Check road reference points
+        for i, point in enumerate(self.road_points):
+            distance = np.sqrt((point[0] - mouse_x)**2 + (point[1] - mouse_y)**2)
+            if distance < min_distance and distance <= self.drag_threshold:
+                min_distance = distance
+                nearest_point = point
+                nearest_index = i
+                nearest_type = "road"
+        
+        return nearest_index, nearest_type if nearest_point is not None else (-1, "")
+    
+    def handle_mouse_event(self, event, x, y, flags, param):
+        """Handle mouse events for real-time adjustment during inference."""
+        if not self.adjustment_mode:
+            return False  # No changes made
+        
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # Start dragging if near a point
+            self.drag_point_index, self.drag_point_type = self.find_nearest_point(x, y)
+            if self.drag_point_index >= 0:
+                self.dragging = True
+                print(f"Started dragging {self.drag_point_type} point {self.drag_point_index + 1}")
+                return True
+        
+        elif event == cv2.EVENT_MOUSEMOVE and self.dragging:
+            # Update point position during drag
+            if self.drag_point_type == "zebra" and 0 <= self.drag_point_index < len(self.zebra_points):
+                self.zebra_points[self.drag_point_index] = [x, y]
+                self.recompute_homography()
+                return True
+            elif self.drag_point_type == "road" and 0 <= self.drag_point_index < len(self.road_points):
+                self.road_points[self.drag_point_index] = [x, y]
+                self.recompute_homography()
+                return True
+        
+        elif event == cv2.EVENT_LBUTTONUP:
+            # Stop dragging
+            if self.dragging:
+                self.dragging = False
+                print(f"Stopped dragging {self.drag_point_type} point {self.drag_point_index + 1}")
+                # Auto-save configuration after adjustment
+                self.save_zebra_config()
+                return True
+        
+        return False  # No changes made
+    
+    def recompute_homography(self):
+        """Recompute homography matrix after point adjustment."""
+        if len(self.road_points) == 4:
+            self.compute_homography_enhanced()
+        elif len(self.zebra_points) == 4:
+            self.compute_homography()
+    
+    def draw_reference_lines(self, frame):
+        """Draw reference lines and points on the frame for real-time adjustment."""
+        if not self.show_reference_lines:
+            return frame
+        
+        display_frame = frame.copy()
+        
+        # Draw zebra crossing points and lines (green)
+        if len(self.zebra_points) > 0:
+            for i, point in enumerate(self.zebra_points):
+                # Highlight if being dragged
+                color = (0, 255, 255) if (self.dragging and self.drag_point_type == "zebra" and self.drag_point_index == i) else (0, 255, 0)
+                thickness = 3 if (self.dragging and self.drag_point_type == "zebra" and self.drag_point_index == i) else 2
+                
+                cv2.circle(display_frame, tuple(map(int, point)), 8, color, -1)
+                cv2.putText(display_frame, f"Z{i+1}", 
+                           (int(point[0]+12), int(point[1]-8)), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, thickness)
+            
+            # Draw zebra crossing outline
+            if len(self.zebra_points) == 4:
+                for i in range(4):
+                    start = tuple(map(int, self.zebra_points[i]))
+                    end = tuple(map(int, self.zebra_points[(i+1) % 4]))
+                    cv2.line(display_frame, start, end, (0, 255, 255), 2)
+        
+        # Draw road reference points and lines (blue)
+        if len(self.road_points) > 0:
+            for i, point in enumerate(self.road_points):
+                # Highlight if being dragged
+                color = (255, 255, 0) if (self.dragging and self.drag_point_type == "road" and self.drag_point_index == i) else (255, 0, 0)
+                thickness = 3 if (self.dragging and self.drag_point_type == "road" and self.drag_point_index == i) else 2
+                
+                cv2.circle(display_frame, tuple(map(int, point)), 8, color, -1)
+                cv2.putText(display_frame, f"R{i+1}", 
+                           (int(point[0]+12), int(point[1]-8)), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, thickness)
+            
+            # Draw road edge lines
+            if len(self.road_points) >= 3:
+                # Left edge (points 0,2)
+                cv2.line(display_frame, tuple(map(int, self.road_points[0])), 
+                        tuple(map(int, self.road_points[2])), (255, 255, 0), 2)
+            if len(self.road_points) >= 4:
+                # Right edge (points 1,3)
+                cv2.line(display_frame, tuple(map(int, self.road_points[1])), 
+                        tuple(map(int, self.road_points[3])), (255, 255, 0), 2)
+        
+        # Add adjustment mode indicator
+        mode_text = "ADJUSTMENT MODE: ON" if self.adjustment_mode else "ADJUSTMENT MODE: OFF"
+        mode_color = (0, 255, 0) if self.adjustment_mode else (128, 128, 128)
+        cv2.putText(display_frame, mode_text, (10, frame.shape[0] - 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
+        
+        # Add instructions
+        if self.adjustment_mode:
+            instructions = [
+                "Click and drag points to adjust",
+                "Press 'a' to toggle adjustment mode",
+                "Press 'l' to toggle reference lines"
+            ]
+        else:
+            instructions = [
+                "Press 'a' to enable adjustment mode",
+                "Press 'l' to toggle reference lines"
+            ]
+        
+        for i, instruction in enumerate(instructions):
+            cv2.putText(display_frame, instruction, (10, frame.shape[0] - 30 + i*15), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        return display_frame
     
     def compute_homography_enhanced(self):
         """Compute homography matrix using only road reference points for better alignment."""
