@@ -29,6 +29,13 @@ class HomographyProjector:
         self.drag_threshold = 15  # pixels
         self.adjustment_mode = False  # Toggle for enabling/disabling adjustments
         
+        # Safety zone configuration
+        self.safety_zone_configured = False
+        self.safety_zone_top = []    # Top boundary line (2 points)
+        self.safety_zone_bottom = []  # Bottom boundary line (2 points)
+        self.show_safety_zones = True
+        self.safety_zone_distance = 50  # Default distance from zebra crossing
+        
         # Define top-view zebra crossing coordinates (destination) - centered
         canvas_center_x = self.topview_size[1] // 2  # 400
         canvas_center_y = self.topview_size[0] // 2  # 300
@@ -54,18 +61,21 @@ class HomographyProjector:
         self.load_zebra_config()
     
     def save_zebra_config(self):
-        """Save zebra crossing and road reference configuration to file."""
+        """Save zebra crossing, road reference, and safety zone configuration to file."""
         config = {
             'zebra_points': self.zebra_points,
             'road_points': self.road_points,
-            'zebra_configured': self.zebra_configured
+            'zebra_configured': self.zebra_configured,
+            'safety_zone_top': self.safety_zone_top,
+            'safety_zone_bottom': self.safety_zone_bottom,
+            'safety_zone_configured': self.safety_zone_configured
         }
         with open(self.config_file, 'w') as f:
             json.dump(config, f, indent=2)
         print(f"Configuration saved to {self.config_file}")
     
     def load_zebra_config(self):
-        """Load zebra crossing and road reference configuration from file."""
+        """Load zebra crossing, road reference, and safety zone configuration from file."""
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
@@ -73,6 +83,9 @@ class HomographyProjector:
                 self.zebra_points = config.get('zebra_points', [])
                 self.road_points = config.get('road_points', [])
                 self.zebra_configured = config.get('zebra_configured', False)
+                self.safety_zone_top = config.get('safety_zone_top', [])
+                self.safety_zone_bottom = config.get('safety_zone_bottom', [])
+                self.safety_zone_configured = config.get('safety_zone_configured', False)
                 if self.zebra_configured and len(self.zebra_points) == 4 and len(self.road_points) == 4:
                     self.compute_homography_enhanced()
                     print(f"Loaded configuration from {self.config_file}")
@@ -208,6 +221,177 @@ class HomographyProjector:
         print(f"Reference lines: {status}")
         return self.show_reference_lines
     
+    def setup_safety_zones_interactive(self, frame):
+        """Setup safety zones for vehicle proximity detection."""
+        print("\n=== SAFETY ZONE SETUP ===")
+        print("Click 4 points to define the safety zone boundaries:")
+        print("1-2: Top boundary line (left to right)")
+        print("3-4: Bottom boundary line (left to right)")
+        print("Press 's' to save, 'r' to reset, 'q' to quit without saving")
+        
+        self.safety_zone_top = []
+        self.safety_zone_bottom = []
+        temp_frame = frame.copy()
+        
+        def mouse_callback(event, x, y, flags, param):
+            nonlocal temp_frame
+            if event == cv2.EVENT_LBUTTONDOWN:
+                total_points = len(self.safety_zone_top) + len(self.safety_zone_bottom)
+                
+                if total_points < 2:
+                    # Adding top boundary points
+                    self.safety_zone_top.append([x, y])
+                    print(f"Top boundary point {len(self.safety_zone_top)}: ({x}, {y})")
+                elif total_points < 4:
+                    # Adding bottom boundary points
+                    self.safety_zone_bottom.append([x, y])
+                    print(f"Bottom boundary point {len(self.safety_zone_bottom)}: ({x}, {y})")
+                
+                # Redraw frame with current points
+                temp_frame = frame.copy()
+                self._draw_safety_zone_setup(temp_frame)
+                cv2.imshow('Safety Zone Setup', temp_frame)
+        
+        cv2.namedWindow('Safety Zone Setup', cv2.WINDOW_NORMAL)
+        cv2.setMouseCallback('Safety Zone Setup', mouse_callback)
+        cv2.imshow('Safety Zone Setup', temp_frame)
+        
+        while True:
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('s') and len(self.safety_zone_top) == 2 and len(self.safety_zone_bottom) == 2:
+                self.safety_zone_configured = True
+                self.save_zebra_config()  # Save with safety zones
+                print("Safety zones saved successfully!")
+                break
+            elif key == ord('r'):
+                self.safety_zone_top = []
+                self.safety_zone_bottom = []
+                temp_frame = frame.copy()
+                cv2.imshow('Safety Zone Setup', temp_frame)
+                print("Safety zones reset")
+            elif key == ord('q'):
+                print("Safety zone setup cancelled")
+                break
+        
+        cv2.destroyWindow('Safety Zone Setup')
+    
+    def _draw_safety_zone_setup(self, frame):
+        """Draw safety zone setup visualization."""
+        # Draw zebra crossing points if available
+        if len(self.zebra_points) == 4:
+            zebra_pts = np.array(self.zebra_points, dtype=np.int32)
+            cv2.polylines(frame, [zebra_pts], True, (0, 255, 255), 2)  # Yellow zebra crossing
+        
+        # Draw top boundary line
+        if len(self.safety_zone_top) >= 2:
+            cv2.line(frame, tuple(self.safety_zone_top[0]), tuple(self.safety_zone_top[1]), (0, 0, 255), 3)  # Red top line
+            cv2.putText(frame, "TOP BOUNDARY", tuple(self.safety_zone_top[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
+        # Draw bottom boundary line
+        if len(self.safety_zone_bottom) >= 2:
+            cv2.line(frame, tuple(self.safety_zone_bottom[0]), tuple(self.safety_zone_bottom[1]), (255, 0, 0), 3)  # Blue bottom line
+            cv2.putText(frame, "BOTTOM BOUNDARY", tuple(self.safety_zone_bottom[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+        
+        # Draw current points
+        for i, point in enumerate(self.safety_zone_top):
+            cv2.circle(frame, tuple(point), 8, (0, 0, 255), -1)
+            cv2.putText(frame, f"T{i+1}", (point[0]+10, point[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        
+        for i, point in enumerate(self.safety_zone_bottom):
+            cv2.circle(frame, tuple(point), 8, (255, 0, 0), -1)
+            cv2.putText(frame, f"B{i+1}", (point[0]+10, point[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+    
+    def toggle_safety_zones(self):
+        """Toggle visibility of safety zone lines."""
+        self.show_safety_zones = not self.show_safety_zones
+        status = "VISIBLE" if self.show_safety_zones else "HIDDEN"
+        print(f"Safety zones: {status}")
+        return self.show_safety_zones
+    
+    def is_vehicle_in_safety_zone(self, x, y):
+        """Check if a vehicle position is within the safety zone boundaries OR in the zebra crossing."""
+        # First check if vehicle is directly in the zebra crossing
+        if self.zebra_configured and len(self.zebra_points) == 4:
+            # Get zebra crossing bounds
+            zebra_bounds = self.get_zebra_crossing_bounds()
+            if zebra_bounds:
+                x1, y1, x2, y2 = zebra_bounds
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    return True  # Vehicle is in zebra crossing, definitely unsafe
+        
+        # Then check safety zone boundaries
+        if not self.safety_zone_configured or len(self.safety_zone_top) != 2 or len(self.safety_zone_bottom) != 2:
+            return False
+        
+        # PROJECT safety zone coordinates from camera view to top-view coordinates
+        if self.homography_matrix is None:
+            return False  # Can't project without homography matrix
+        
+        try:
+            # Project safety zone top line points
+            top_src_points = np.array(self.safety_zone_top, dtype=np.float32)
+            top_projected = cv2.perspectiveTransform(top_src_points.reshape(-1, 1, 2), self.homography_matrix)
+            top_line_projected = top_projected.reshape(-1, 2)
+            
+            # Project safety zone bottom line points
+            bottom_src_points = np.array(self.safety_zone_bottom, dtype=np.float32)
+            bottom_projected = cv2.perspectiveTransform(bottom_src_points.reshape(-1, 1, 2), self.homography_matrix)
+            bottom_line_projected = bottom_projected.reshape(-1, 2)
+            
+            # Get the projected coordinates
+            x1_top, y1_top = top_line_projected[0]
+            x2_top, y2_top = top_line_projected[1]
+            x1_bottom, y1_bottom = bottom_line_projected[0]
+            x2_bottom, y2_bottom = bottom_line_projected[1]
+            
+        except Exception as e:
+            print(f"Error projecting safety zones: {e}")
+            return False
+        
+        # Skip vehicles with clearly invalid projected coordinates
+        if x < -100 or x > self.topview_size[1] + 100 or y < -100 or y > self.topview_size[0] + 100:
+            return False
+        
+        # Calculate y-coordinate on top line at vehicle's x position
+        if x2_top != x1_top:
+            m_top = (y2_top - y1_top) / (x2_top - x1_top)
+            y_top = m_top * (x - x1_top) + y1_top
+        else:
+            y_top = y1_top  # Vertical line
+        
+        # Calculate y-coordinate on bottom line at vehicle's x position
+        if x2_bottom != x1_bottom:
+            m_bottom = (y2_bottom - y1_bottom) / (x2_bottom - x1_bottom)
+            y_bottom = m_bottom * (x - x1_bottom) + y1_bottom
+        else:
+            y_bottom = y1_bottom  # Vertical line
+        
+        # Determine which line is actually the top and which is the bottom based on y-coordinates
+        # The line with SMALLER y-coordinate is actually the top (closer to zebra)
+        # The line with LARGER y-coordinate is actually the bottom (farther from zebra)
+        actual_top_y = min(y_top, y_bottom)
+        actual_bottom_y = max(y_top, y_bottom)
+        
+        # Check if vehicle is within the safety zone boundaries (between actual top and bottom)
+        # No buffer - exact boundary detection
+        is_in_safety_zone = actual_top_y <= y <= actual_bottom_y
+        
+        # Debug output to track safety zone boundaries (now in projected coordinates)
+        print(f"Vehicle at ({x:.1f},{y:.1f}) - Projected safety zone: {actual_top_y:.1f} <= {y:.1f} <= {actual_bottom_y:.1f} (no buffer) -> {'IN' if is_in_safety_zone else 'OUT'}")
+        
+        return is_in_safety_zone
+    
+    def get_safety_zone_bounds(self):
+        """Get safety zone boundaries for the safety policy."""
+        if not self.safety_zone_configured:
+            return None
+        
+        return {
+            'top_line': self.safety_zone_top,
+            'bottom_line': self.safety_zone_bottom,
+            'configured': True
+        }
+    
     def find_nearest_point(self, mouse_x, mouse_y):
         """Find the nearest draggable point to mouse position."""
         min_distance = float('inf')
@@ -233,6 +417,24 @@ class HomographyProjector:
                 nearest_index = i
                 nearest_type = "road"
         
+        # Check safety zone top points
+        for i, point in enumerate(self.safety_zone_top):
+            distance = np.sqrt((point[0] - mouse_x)**2 + (point[1] - mouse_y)**2)
+            if distance < min_distance and distance <= self.drag_threshold:
+                min_distance = distance
+                nearest_point = point
+                nearest_index = i
+                nearest_type = "safety_top"
+        
+        # Check safety zone bottom points
+        for i, point in enumerate(self.safety_zone_bottom):
+            distance = np.sqrt((point[0] - mouse_x)**2 + (point[1] - mouse_y)**2)
+            if distance < min_distance and distance <= self.drag_threshold:
+                min_distance = distance
+                nearest_point = point
+                nearest_index = i
+                nearest_type = "safety_bottom"
+        
         return nearest_index, nearest_type if nearest_point is not None else (-1, "")
     
     def handle_mouse_event(self, event, x, y, flags, param):
@@ -257,6 +459,12 @@ class HomographyProjector:
             elif self.drag_point_type == "road" and 0 <= self.drag_point_index < len(self.road_points):
                 self.road_points[self.drag_point_index] = [x, y]
                 self.recompute_homography()
+                return True
+            elif self.drag_point_type == "safety_top" and 0 <= self.drag_point_index < len(self.safety_zone_top):
+                self.safety_zone_top[self.drag_point_index] = [x, y]
+                return True
+            elif self.drag_point_type == "safety_bottom" and 0 <= self.drag_point_index < len(self.safety_zone_bottom):
+                self.safety_zone_bottom[self.drag_point_index] = [x, y]
                 return True
         
         elif event == cv2.EVENT_LBUTTONUP:
@@ -336,17 +544,49 @@ class HomographyProjector:
             instructions = [
                 "Click and drag points to adjust",
                 "Press 'a' to toggle adjustment mode",
-                "Press 'l' to toggle reference lines"
+                "Press 'l' to toggle reference lines",
+                "Press 'z' to toggle safety zones"
             ]
         else:
             instructions = [
                 "Press 'a' to enable adjustment mode",
-                "Press 'l' to toggle reference lines"
+                "Press 'l' to toggle reference lines",
+                "Press 'z' to toggle safety zones"
             ]
         
         for i, instruction in enumerate(instructions):
             cv2.putText(display_frame, instruction, (10, frame.shape[0] - 30 + i*15), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Draw safety zones if configured and visible
+        if self.show_safety_zones and self.safety_zone_configured:
+            # Draw top boundary line
+            if len(self.safety_zone_top) == 2:
+                cv2.line(display_frame, tuple(map(int, self.safety_zone_top[0])), 
+                        tuple(map(int, self.safety_zone_top[1])), (0, 0, 255), 3)  # Red line
+                cv2.putText(display_frame, "SAFETY TOP", tuple(map(int, self.safety_zone_top[0])), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                
+                # Draw safety zone top points
+                for i, point in enumerate(self.safety_zone_top):
+                    color = (255, 255, 0) if (self.dragging and self.drag_point_type == "safety_top" and self.drag_point_index == i) else (0, 0, 255)
+                    cv2.circle(display_frame, tuple(map(int, point)), 8, color, -1)
+                    cv2.putText(display_frame, f"ST{i+1}", (int(point[0])+10, int(point[1])-10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            
+            # Draw bottom boundary line
+            if len(self.safety_zone_bottom) == 2:
+                cv2.line(display_frame, tuple(map(int, self.safety_zone_bottom[0])), 
+                        tuple(map(int, self.safety_zone_bottom[1])), (255, 0, 0), 3)  # Blue line
+                cv2.putText(display_frame, "SAFETY BOTTOM", tuple(map(int, self.safety_zone_bottom[0])), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                
+                # Draw safety zone bottom points
+                for i, point in enumerate(self.safety_zone_bottom):
+                    color = (255, 255, 0) if (self.dragging and self.drag_point_type == "safety_bottom" and self.drag_point_index == i) else (255, 0, 0)
+                    cv2.circle(display_frame, tuple(map(int, point)), 8, color, -1)
+                    cv2.putText(display_frame, f"SB{i+1}", (int(point[0])+10, int(point[1])-10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
         
         return display_frame
     
@@ -540,6 +780,34 @@ class HomographyProjector:
                 (center_x, self.topview_size[0] - road_margin),
                 (255, 255, 255), 2)
         
+        # Draw safety zones if configured and visible
+        if self.show_safety_zones and self.safety_zone_configured and self.homography_matrix is not None:
+            if len(self.safety_zone_top) == 2 and len(self.safety_zone_bottom) == 2:
+                # Project safety zone lines to top-view
+                try:
+                    # Top line
+                    top_src_points = np.array(self.safety_zone_top, dtype=np.float32)
+                    top_projected = cv2.perspectiveTransform(top_src_points.reshape(-1, 1, 2), self.homography_matrix)
+                    top_line = top_projected.reshape(-1, 2).astype(int)
+                    
+                    # Bottom line
+                    bottom_src_points = np.array(self.safety_zone_bottom, dtype=np.float32)
+                    bottom_projected = cv2.perspectiveTransform(bottom_src_points.reshape(-1, 1, 2), self.homography_matrix)
+                    bottom_line = bottom_projected.reshape(-1, 2).astype(int)
+                    
+                    # Draw safety zone boundaries
+                    cv2.line(topview_img, tuple(top_line[0]), tuple(top_line[1]), (0, 0, 255), 3)  # Red top line
+                    cv2.line(topview_img, tuple(bottom_line[0]), tuple(bottom_line[1]), (255, 0, 0), 3)  # Blue bottom line
+                    
+                    # Add labels
+                    cv2.putText(topview_img, "SAFETY TOP", tuple(top_line[0]), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                    cv2.putText(topview_img, "SAFETY BOTTOM", tuple(bottom_line[0]), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                except:
+                    # If projection fails, skip safety zone drawing
+                    pass
+        
         # Color mapping for different object types
         colors = {
             'person': (0, 255, 0),      # Green for pedestrians
@@ -572,10 +840,61 @@ class HomographyProjector:
             # Draw object as circle
             cv2.circle(topview_img, (canvas_x, canvas_y), 12, color, -1)
             
-            # Add label
+            # Add class label
             cv2.putText(topview_img, class_name[:3], 
-                       (canvas_x + 15, canvas_y), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                       (canvas_x + 15, canvas_y - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # Add coordinate information near each vehicle
+            coord_text = f"({int(x)},{int(y)})"
+            cv2.putText(topview_img, coord_text, 
+                       (canvas_x + 15, canvas_y + 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            
+            # For vehicles, also show if they're in safety zone
+            if class_name in ['car', 'truck', 'bus', 'motorcycle', 'bicycle']:
+                if self.safety_zone_configured:
+                    is_in_zone = self.is_vehicle_in_safety_zone(x, y)
+                    zone_status = "IN" if is_in_zone else "OUT"
+                    zone_color = (0, 255, 0) if is_in_zone else (0, 0, 255)
+                    cv2.putText(topview_img, zone_status, 
+                               (canvas_x + 15, canvas_y + 25), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, zone_color, 1)
+        
+        # Add safety zone coordinate information at the top
+        if self.safety_zone_configured and len(self.safety_zone_top) == 2 and len(self.safety_zone_bottom) == 2:
+            # Display safety zone y-coordinates at different x positions
+            test_x_positions = [200, 300, 400, 500]
+            y_offset = 160
+            
+            cv2.putText(topview_img, "Safety Zone Y-coords at different X:", 
+                       (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
+            
+            for i, test_x in enumerate(test_x_positions):
+                # Calculate y-coordinates of safety lines at this x position
+                x1_top, y1_top = self.safety_zone_top[0]
+                x2_top, y2_top = self.safety_zone_top[1]
+                x1_bottom, y1_bottom = self.safety_zone_bottom[0]
+                x2_bottom, y2_bottom = self.safety_zone_bottom[1]
+                
+                # Calculate y-coordinate on top line
+                if x2_top != x1_top:
+                    m_top = (y2_top - y1_top) / (x2_top - x1_top)
+                    y_top_at_x = m_top * (test_x - x1_top) + y1_top
+                else:
+                    y_top_at_x = y1_top
+                
+                # Calculate y-coordinate on bottom line
+                if x2_bottom != x1_bottom:
+                    m_bottom = (y2_bottom - y1_bottom) / (x2_bottom - x1_bottom)
+                    y_bottom_at_x = m_bottom * (test_x - x1_bottom) + y1_bottom
+                else:
+                    y_bottom_at_x = y1_bottom
+                
+                zone_text = f"X{test_x}: {int(min(y_top_at_x, y_bottom_at_x))}-{int(max(y_top_at_x, y_bottom_at_x))}"
+                cv2.putText(topview_img, zone_text, 
+                           (20 + i * 150, y_offset + 25), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         
         # Add title and info
         cv2.putText(topview_img, "Top View (Homography)", 

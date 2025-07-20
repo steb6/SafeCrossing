@@ -62,11 +62,29 @@ class SmartTrafficLightSystem:
             if ret:
                 self.homography.setup_zebra_crossing_interactive(frame)
                 self.zebra_setup_done = True
+                
+                # After zebra crossing setup, optionally setup safety zones
+                if self.zebra_setup_done and not self.homography.safety_zone_configured:
+                    print("\nWould you like to setup safety zones for vehicle detection? (y/n)")
+                    choice = input().lower().strip()
+                    if choice in ['y', 'yes']:
+                        self.homography.setup_safety_zones_interactive(frame)
             else:
                 print("Could not read video for zebra crossing setup")
         else:
             print("Zebra crossing already configured")
             self.zebra_setup_done = True
+            
+            # Check if safety zones need setup
+            if not self.homography.safety_zone_configured:
+                print("Safety zones not configured. Would you like to set them up? (y/n)")
+                choice = input().lower().strip()
+                if choice in ['y', 'yes']:
+                    cap = cv2.VideoCapture(video_path)
+                    ret, frame = cap.read()
+                    cap.release()
+                    if ret:
+                        self.homography.setup_safety_zones_interactive(frame)
     
     def process_frame(self, frame, frame_number=None):
         """Process a single video frame through the complete pipeline."""
@@ -87,11 +105,12 @@ class SmartTrafficLightSystem:
         # Step 3: Get actual zebra crossing bounds for safety analysis
         zebra_bounds = self.homography.get_zebra_crossing_bounds()
         
-        # Step 4: Analyze safety and get recommendations
+        # Step 4: Analyze safety and get recommendations (pass homography projector for safety zones)
         safety_result = self.safety_policy.analyze_safety(
             projected_detections, 
             self.current_traffic_light_state,
-            zebra_bounds
+            zebra_bounds,
+            self.homography  # Pass homography projector for safety zone checking
         )
         
         # Step 5: Get traffic light control recommendation
@@ -123,6 +142,7 @@ class SmartTrafficLightSystem:
         risk_level = pipeline_result['safety_result']['risk_level']
         pedestrians_in_crossing = pipeline_result['safety_result'].get('pedestrians_in_crossing', 0)
         vehicles_near_crossing = pipeline_result['safety_result'].get('vehicles_near_crossing', 0)
+        vehicles_in_crossing = pipeline_result['safety_result'].get('vehicles_in_crossing', 0)
         
         # Choose color based on safety status
         if safety_status == SafetyStatus.SAFE:
@@ -133,7 +153,7 @@ class SmartTrafficLightSystem:
             status_color = (0, 0, 255)  # Red
         
         # Larger safety status panel
-        cv2.rectangle(annotated_frame, (10, 10), (500, 160), (0, 0, 0), -1)
+        cv2.rectangle(annotated_frame, (10, 10), (500, 180), (0, 0, 0), -1)
         cv2.putText(annotated_frame, f"Safety: {safety_status.value}", 
                    (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
         cv2.putText(annotated_frame, f"Risk Level: {risk_level:.2f}", 
@@ -144,20 +164,22 @@ class SmartTrafficLightSystem:
                    (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(annotated_frame, f"Vehicles near crossing: {vehicles_near_crossing}", 
                    (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(annotated_frame, f"Vehicles in crossing: {vehicles_in_crossing}", 
+                   (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0) if vehicles_in_crossing > 0 else (255, 255, 255), 2)
         
         # Add traffic light state
         light_color = (0, 255, 0) if self.current_traffic_light_state == "GREEN" else \
                      (0, 255, 255) if self.current_traffic_light_state == "YELLOW" else \
                      (0, 0, 255)
         cv2.putText(annotated_frame, f"Light: {self.current_traffic_light_state}", 
-                   (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.6, light_color, 2)
+                   (20, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.6, light_color, 2)
         
         # Add object count with bigger, more visible text
         object_counts = {}
         for class_name in pipeline_result['detections']['class_names']:
             object_counts[class_name] = object_counts.get(class_name, 0) + 1
         
-        y_offset = 180
+        y_offset = 210  # Moved down to accommodate vehicles_in_crossing display
         for class_name, count in object_counts.items():
             cv2.putText(annotated_frame, f"{class_name}: {count}", 
                        (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
@@ -195,56 +217,42 @@ class SmartTrafficLightSystem:
         return combined_frame
     
     def _log_status_change(self, new_status, safety_result, frame_number):
-        """Log detailed status changes with reasoning including early warning vehicles."""
-        risk_level = safety_result['risk_level']
-        recommendations = safety_result.get('recommendations', [])
-        
-        # Get detailed information including new early warning category
+        """Log concise status changes with key reasons only."""
+        # Get essential information
         pedestrians_in_crossing = safety_result.get('pedestrians_in_crossing', 0)
-        vehicles_early_warning = safety_result.get('vehicles_early_warning', 0)
-        vehicles_approaching = safety_result.get('vehicles_approaching', 0)
-        vehicles_close_approach = safety_result.get('vehicles_close_approach', 0)
-        vehicles_high_speed_close = safety_result.get('vehicles_high_speed_close', 0)
+        vehicles_in_crossing = safety_result.get('vehicles_in_crossing', 0)
         total_vehicles = safety_result.get('vehicles_near_crossing', 0)
         
-        # Status change announcement
+        # Status change announcement with reason
         status_icon = {"SAFE": "✅", "NOT_SAFE": "⚠️", "DANGER": "🚨"}.get(new_status.value, "❓")
-        print(f"\n{status_icon} FRAME {frame_number}: STATUS CHANGED TO {new_status.value}")
-        print(f"   Risk Level: {risk_level:.2f}")
         
-        # Detailed reasoning based on status
+        # Determine and show the primary reason for the status
         if new_status.value == "DANGER":
-            print("   🚨 DANGER REASONS:")
-            if vehicles_high_speed_close > 0:
-                print(f"   • {vehicles_high_speed_close} vehicle(s) at HIGH SPEED very close to zebra crossing")
-            if vehicles_close_approach > 0 and pedestrians_in_crossing > 0:
-                print(f"   • {vehicles_close_approach} vehicle(s) close approach + {pedestrians_in_crossing} pedestrian(s) crossing")
-            if risk_level >= 0.8:
-                print("   • Risk level indicates immediate collision threat")
+            if vehicles_in_crossing > 0:
+                reason = f"🚗 {vehicles_in_crossing} vehicle(s) on zebra crossing"
+            elif pedestrians_in_crossing > 0 and total_vehicles > 0:
+                reason = f"👥 {pedestrians_in_crossing} pedestrian(s) crossing with {total_vehicles} vehicle(s) nearby"
+            else:
+                reason = "High collision risk detected"
+            print(f"{status_icon} FRAME {frame_number}: DANGER - {reason}")
                 
         elif new_status.value == "NOT_SAFE":
-            print("   ⚠️ NOT_SAFE REASONS:")
-            if vehicles_early_warning > 0:
-                print(f"   • 🟡 {vehicles_early_warning} vehicle(s) in early warning zone (300px)")
-            if vehicles_approaching > 0:
-                print(f"   • 🟠 {vehicles_approaching} vehicle(s) approaching zebra crossing (200px)")
-            if vehicles_close_approach > 0:
-                print(f"   • 🔴 {vehicles_close_approach} vehicle(s) in close approach zone (100px)")
-            if pedestrians_in_crossing > 0 and total_vehicles > 0:
-                print(f"   • {pedestrians_in_crossing} pedestrian(s) crossing with {total_vehicles} vehicle(s) nearby")
+            if total_vehicles > 0:
+                reason = f"� {total_vehicles} vehicle(s) near zebra crossing"
+            else:
+                reason = "Potential safety concerns"
+            print(f"{status_icon} FRAME {frame_number}: NOT_SAFE - {reason}")
                 
         elif new_status.value == "SAFE":
-            print("   ✅ SAFE REASONS:")
-            if total_vehicles == 0:
-                print("   • No vehicles detected near zebra crossing")
+            if total_vehicles == 0 and pedestrians_in_crossing == 0:
+                reason = "No vehicles or pedestrians detected"
+            elif total_vehicles == 0:
+                reason = "No vehicles near crossing"
             elif pedestrians_in_crossing == 0:
-                print("   • No pedestrians currently crossing")
+                reason = "No active pedestrian crossings"
             else:
-                print("   • Risk factors below safety thresholds")
-        
-        # Show main recommendation
-        if recommendations:
-            print(f"   📋 ACTION: {recommendations[0]}")
+                reason = "All safety conditions met"
+            print(f"{status_icon} FRAME {frame_number}: SAFE - {reason}")
         
         print()  # Empty line for readability
     
@@ -388,6 +396,46 @@ class SmartTrafficLightSystem:
                 # Manual save configuration
                 self.homography.save_zebra_config()
                 print("Configuration saved manually")
+            elif key == ord('+') or key == ord('='):
+                # Zoom in
+                self.homography.zoom_in()
+            elif key == ord('-') or key == ord('_'):
+                # Zoom out
+                self.homography.zoom_out()
+            elif key == ord('0'):
+                # Reset zoom
+                self.homography.reset_zoom()
+            elif key == ord('z'):
+                # Toggle safety zones
+                self.homography.toggle_safety_zones()
+            elif paused and key == 83:  # Right arrow key (when paused)
+                # Move forward one frame
+                current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                if current_frame < total_frames - 1:
+                    ret, frame = cap.read()
+                    if ret:
+                        self.frame_count = current_frame + 1
+                        print(f"Frame: {self.frame_count}/{total_frames}")
+                        # Process this frame to show updated visualization
+                        pipeline_result = self.process_frame(frame, self.frame_count)
+                        if pipeline_result:
+                            combined_frame = self.visualize_results(frame, pipeline_result)
+                            cv2.imshow('Smart Traffic Light System', combined_frame)
+            elif paused and key == 81:  # Left arrow key (when paused)
+                # Move backward one frame
+                current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if current_frame > 1:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame - 2)  # Go back 2 to compensate for the read
+                    ret, frame = cap.read()
+                    if ret:
+                        self.frame_count = current_frame - 1
+                        print(f"Frame: {self.frame_count}")
+                        # Process this frame to show updated visualization
+                        pipeline_result = self.process_frame(frame, self.frame_count)
+                        if pipeline_result:
+                            combined_frame = self.visualize_results(frame, pipeline_result)
+                            cv2.imshow('Smart Traffic Light System', combined_frame)
         
         # Cleanup
         cap.release()
@@ -439,6 +487,11 @@ def main():
     print("  'a' - Toggle adjustment mode (drag points to recalibrate)")
     print("  'l' - Toggle reference lines visibility")
     print("  's' - Save configuration (when in adjustment mode)")
+    print("  '+' - Zoom in on top view")
+    print("  '-' - Zoom out on top view")
+    print("  '0' - Reset zoom to normal")
+    print("  'z' - Toggle safety zones visibility")
+    print("  'Left/Right Arrow' - Navigate frames when paused")
     print("=" * 50)
     
     system.run_video_processing(video_path)
