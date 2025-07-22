@@ -298,19 +298,12 @@ class SmartTrafficLightSystem:
         cv2.putText(annotated_frame, f"Vehicles in crossing: {vehicles_in_crossing}", 
                    (20, 290), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 0, 0) if vehicles_in_crossing > 0 else (255, 255, 255), 5)
         
-        # Add traffic light state with massive text
-        light_color = (0, 255, 0) if traffic_light_state == "GREEN" else \
-                     (0, 255, 255) if traffic_light_state == "YELLOW" else \
-                     (0, 0, 255)
-        cv2.putText(annotated_frame, f"Light: {traffic_light_state}", 
-                   (20, 340), cv2.FONT_HERSHEY_SIMPLEX, 2.0, light_color, 5)
-        
         # Add object count with larger text size
         object_counts = {}
         for class_name in pipeline_result['detections']['class_names']:
             object_counts[class_name] = object_counts.get(class_name, 0) + 1
         
-        y_offset = 440  # Moved down to accommodate much bigger status panel with temporal filtering info
+        y_offset = 340  # Moved up since we removed the traffic light state text
         for class_name, count in object_counts.items():
             cv2.putText(annotated_frame, f"{class_name}: {count}", 
                        (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255, 255, 255), 4)
