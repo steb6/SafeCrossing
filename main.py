@@ -152,38 +152,38 @@ class SmartTrafficLightSystem:
         else:  # DANGER
             status_color = (0, 0, 255)  # Red
         
-        # Larger safety status panel
-        cv2.rectangle(annotated_frame, (10, 10), (500, 180), (0, 0, 0), -1)
+        # Much larger safety status panel with bigger text
+        cv2.rectangle(annotated_frame, (10, 10), (650, 250), (0, 0, 0), -1)
         cv2.putText(annotated_frame, f"Safety: {safety_status.value}", 
-                   (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+                   (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, status_color, 4)
         cv2.putText(annotated_frame, f"Risk Level: {risk_level:.2f}", 
-                   (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                   (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
         
-        # Add pedestrian and vehicle counts
+        # Add pedestrian and vehicle counts with bigger text
         cv2.putText(annotated_frame, f"Pedestrians in crossing: {pedestrians_in_crossing}", 
-                   (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                   (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
         cv2.putText(annotated_frame, f"Vehicles near crossing: {vehicles_near_crossing}", 
-                   (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                   (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
         cv2.putText(annotated_frame, f"Vehicles in crossing: {vehicles_in_crossing}", 
-                   (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0) if vehicles_in_crossing > 0 else (255, 255, 255), 2)
+                   (20, 210), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0) if vehicles_in_crossing > 0 else (255, 255, 255), 3)
         
-        # Add traffic light state
+        # Add traffic light state with bigger text
         light_color = (0, 255, 0) if self.current_traffic_light_state == "GREEN" else \
                      (0, 255, 255) if self.current_traffic_light_state == "YELLOW" else \
                      (0, 0, 255)
         cv2.putText(annotated_frame, f"Light: {self.current_traffic_light_state}", 
-                   (20, 185), cv2.FONT_HERSHEY_SIMPLEX, 0.6, light_color, 2)
+                   (20, 250), cv2.FONT_HERSHEY_SIMPLEX, 1.0, light_color, 3)
         
-        # Add object count with bigger, more visible text
+        # Add object count with much bigger, more visible text
         object_counts = {}
         for class_name in pipeline_result['detections']['class_names']:
             object_counts[class_name] = object_counts.get(class_name, 0) + 1
         
-        y_offset = 210  # Moved down to accommodate vehicles_in_crossing display
+        y_offset = 290  # Moved down to accommodate bigger status panel
         for class_name, count in object_counts.items():
             cv2.putText(annotated_frame, f"{class_name}: {count}", 
-                       (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            y_offset += 35  # More spacing between lines
+                       (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+            y_offset += 45  # Much more spacing between lines for bigger text
         
         # Create top-view visualization
         topview_img = self.homography.create_topview_visualization(
@@ -298,6 +298,18 @@ class SmartTrafficLightSystem:
         
         print(f"Target FPS: {target_fps}, Frame delay: {frame_delay_ms}ms")
         
+        # Skip the first 180 frames (useless frames)
+        frames_to_skip = 180
+        print(f"Skipping first {frames_to_skip} frames...")
+        for i in range(frames_to_skip):
+            ret, _ = cap.read()
+            if not ret:
+                print("Video ended before skipping all frames")
+                break
+            self.frame_count += 1
+        
+        print(f"Starting processing from frame {self.frame_count + 1}")
+        
         # Processing loop
         paused = False
         frame_counter = 0
@@ -338,10 +350,10 @@ class SmartTrafficLightSystem:
                     if last_combined_frame is not None:
                         combined_frame = last_combined_frame.copy()
                         
-                        # Update frame counter overlay to show current frame number
+                        # Update frame counter overlay to show current frame number with bigger text
                         actual_height, actual_width = combined_frame.shape[:2]
                         cv2.putText(combined_frame, f"Frame: {self.frame_count} (SKIPPED)", 
-                                   (actual_width-200, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 100), 2)
+                                   (actual_width-350, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 100, 100), 3)
                     else:
                         # Fallback if no previous frame processed yet
                         combined_frame = frame
@@ -352,12 +364,12 @@ class SmartTrafficLightSystem:
                 # Get the actual dimensions of the combined frame
                 actual_height, actual_width = combined_frame.shape[:2]
                 
-                # Add FPS info to the combined frame
+                # Add FPS info to the combined frame with bigger text
                 fps_value = 1/processing_time if processing_time > 0 else 0
                 cv2.putText(combined_frame, f"FPS: {fps_value:.1f}", 
-                           (actual_width-150, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                           (actual_width-300, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
                 cv2.putText(combined_frame, f"Frame: {self.frame_count}", 
-                           (actual_width-150, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                           (actual_width-300, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
                 
                 # Print safety alerts (only for processed frames)
                 if pipeline_result is not None and frame_counter % frame_skip == 0:
@@ -379,7 +391,7 @@ class SmartTrafficLightSystem:
                 key = cv2.waitKey(0) & 0xFF
             else:
                 # When playing, wait for frame delay to maintain proper FPS
-                key = cv2.waitKey(frame_delay_ms) & 0xFF
+                key = cv2.waitKey(1) & 0xFF
                 
             if key == ord('q'):
                 break
@@ -451,7 +463,7 @@ class SmartTrafficLightSystem:
 def main():
     """Main entry point."""
     # Configuration
-    video_path = "AbbeyRoad.mp4"
+    video_path = "Kigali.mp4"
     model_name = "yolo11x.pt"  # Use the most accurate model
     confidence_threshold = 0.3
     
