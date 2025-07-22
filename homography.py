@@ -377,7 +377,7 @@ class HomographyProjector:
         is_in_safety_zone = actual_top_y <= y <= actual_bottom_y
         
         # Debug output to track safety zone boundaries (now in projected coordinates)
-        print(f"Vehicle at ({x:.1f},{y:.1f}) - Projected safety zone: {actual_top_y:.1f} <= {y:.1f} <= {actual_bottom_y:.1f} (no buffer) -> {'IN' if is_in_safety_zone else 'OUT'}")
+        # print(f"Vehicle at ({x:.1f},{y:.1f}) - Projected safety zone: {actual_top_y:.1f} <= {y:.1f} <= {actual_bottom_y:.1f} (no buffer) -> {'IN' if is_in_safety_zone else 'OUT'}")
         
         return is_in_safety_zone
     
@@ -533,13 +533,13 @@ class HomographyProjector:
                 cv2.line(display_frame, tuple(map(int, self.road_points[1])), 
                         tuple(map(int, self.road_points[3])), (255, 255, 0), 2)
         
-        # Add adjustment mode indicator with bigger text
+        # Add adjustment mode indicator with much bigger text
         mode_text = "ADJUSTMENT MODE: ON" if self.adjustment_mode else "ADJUSTMENT MODE: OFF"
         mode_color = (0, 255, 0) if self.adjustment_mode else (128, 128, 128)
         cv2.putText(display_frame, mode_text, (10, frame.shape[0] - 160), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 2.0, mode_color, 5)
+                   cv2.FONT_HERSHEY_SIMPLEX, 2.8, mode_color, 7)
         
-        # Add instructions with bigger text
+        # Add instructions with much bigger text
         if self.adjustment_mode:
             instructions = [
                 "Click and drag points to adjust",
@@ -556,7 +556,7 @@ class HomographyProjector:
         
         for i, instruction in enumerate(instructions):
             cv2.putText(display_frame, instruction, (10, frame.shape[0] - 110 + i*40), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 255), 4)
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 255, 255), 5)
         
         # Draw safety zones if configured and visible
         if self.show_safety_zones and self.safety_zone_configured:
@@ -565,28 +565,28 @@ class HomographyProjector:
                 cv2.line(display_frame, tuple(map(int, self.safety_zone_top[0])), 
                         tuple(map(int, self.safety_zone_top[1])), (0, 0, 255), 3)  # Red line
                 cv2.putText(display_frame, "SAFETY TOP", tuple(map(int, self.safety_zone_top[0])), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
                 
                 # Draw safety zone top points
                 for i, point in enumerate(self.safety_zone_top):
                     color = (255, 255, 0) if (self.dragging and self.drag_point_type == "safety_top" and self.drag_point_index == i) else (0, 0, 255)
                     cv2.circle(display_frame, tuple(map(int, point)), 8, color, -1)
                     cv2.putText(display_frame, f"ST{i+1}", (int(point[0])+10, int(point[1])-10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                               cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
             
             # Draw bottom boundary line
             if len(self.safety_zone_bottom) == 2:
                 cv2.line(display_frame, tuple(map(int, self.safety_zone_bottom[0])), 
                         tuple(map(int, self.safety_zone_bottom[1])), (255, 0, 0), 3)  # Blue line
                 cv2.putText(display_frame, "SAFETY BOTTOM", tuple(map(int, self.safety_zone_bottom[0])), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 3)
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 0), 4)
                 
                 # Draw safety zone bottom points
                 for i, point in enumerate(self.safety_zone_bottom):
                     color = (255, 255, 0) if (self.dragging and self.drag_point_type == "safety_bottom" and self.drag_point_index == i) else (255, 0, 0)
                     cv2.circle(display_frame, tuple(map(int, point)), 8, color, -1)
                     cv2.putText(display_frame, f"SB{i+1}", (int(point[0])+10, int(point[1])-10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                               cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
         
         return display_frame
     
