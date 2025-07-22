@@ -152,38 +152,38 @@ class SmartTrafficLightSystem:
         else:  # DANGER
             status_color = (0, 0, 255)  # Red
         
-        # Much larger safety status panel with bigger text
-        cv2.rectangle(annotated_frame, (10, 10), (650, 250), (0, 0, 0), -1)
+        # Extra large safety status panel with huge text
+        cv2.rectangle(annotated_frame, (10, 10), (800, 320), (0, 0, 0), -1)
         cv2.putText(annotated_frame, f"Safety: {safety_status.value}", 
-                   (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, status_color, 4)
+                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 2.5, status_color, 6)
         cv2.putText(annotated_frame, f"Risk Level: {risk_level:.2f}", 
-                   (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                   (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
         
-        # Add pedestrian and vehicle counts with bigger text
+        # Add pedestrian and vehicle counts with huge text
         cv2.putText(annotated_frame, f"Pedestrians in crossing: {pedestrians_in_crossing}", 
-                   (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                   (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 255), 4)
         cv2.putText(annotated_frame, f"Vehicles near crossing: {vehicles_near_crossing}", 
-                   (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                   (20, 220), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 255), 4)
         cv2.putText(annotated_frame, f"Vehicles in crossing: {vehicles_in_crossing}", 
-                   (20, 210), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0) if vehicles_in_crossing > 0 else (255, 255, 255), 3)
+                   (20, 270), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 0, 0) if vehicles_in_crossing > 0 else (255, 255, 255), 4)
         
-        # Add traffic light state with bigger text
+        # Add traffic light state with huge text
         light_color = (0, 255, 0) if self.current_traffic_light_state == "GREEN" else \
                      (0, 255, 255) if self.current_traffic_light_state == "YELLOW" else \
                      (0, 0, 255)
         cv2.putText(annotated_frame, f"Light: {self.current_traffic_light_state}", 
-                   (20, 250), cv2.FONT_HERSHEY_SIMPLEX, 1.0, light_color, 3)
+                   (20, 320), cv2.FONT_HERSHEY_SIMPLEX, 1.5, light_color, 4)
         
-        # Add object count with much bigger, more visible text
+        # Add object count with moderate text size
         object_counts = {}
         for class_name in pipeline_result['detections']['class_names']:
             object_counts[class_name] = object_counts.get(class_name, 0) + 1
         
-        y_offset = 290  # Moved down to accommodate bigger status panel
+        y_offset = 370  # Moved down to accommodate much bigger status panel
         for class_name, count in object_counts.items():
             cv2.putText(annotated_frame, f"{class_name}: {count}", 
                        (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-            y_offset += 45  # Much more spacing between lines for bigger text
+            y_offset += 45  # Moderate spacing between lines
         
         # Create top-view visualization
         topview_img = self.homography.create_topview_visualization(
@@ -350,10 +350,10 @@ class SmartTrafficLightSystem:
                     if last_combined_frame is not None:
                         combined_frame = last_combined_frame.copy()
                         
-                        # Update frame counter overlay to show current frame number with bigger text
+                        # Update frame counter overlay to show current frame number with huge text
                         actual_height, actual_width = combined_frame.shape[:2]
                         cv2.putText(combined_frame, f"Frame: {self.frame_count} (SKIPPED)", 
-                                   (actual_width-350, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 100, 100), 3)
+                                   (actual_width-500, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (100, 100, 100), 4)
                     else:
                         # Fallback if no previous frame processed yet
                         combined_frame = frame
@@ -364,12 +364,12 @@ class SmartTrafficLightSystem:
                 # Get the actual dimensions of the combined frame
                 actual_height, actual_width = combined_frame.shape[:2]
                 
-                # Add FPS info to the combined frame with bigger text
+                # Add FPS info to the combined frame with huge text
                 fps_value = 1/processing_time if processing_time > 0 else 0
                 cv2.putText(combined_frame, f"FPS: {fps_value:.1f}", 
-                           (actual_width-300, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                           (actual_width-400, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
                 cv2.putText(combined_frame, f"Frame: {self.frame_count}", 
-                           (actual_width-300, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+                           (actual_width-400, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
                 
                 # Print safety alerts (only for processed frames)
                 if pipeline_result is not None and frame_counter % frame_skip == 0:
