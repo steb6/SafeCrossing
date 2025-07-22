@@ -185,6 +185,58 @@ class SmartTrafficLightSystem:
                        (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
             y_offset += 45  # Moderate spacing between lines
         
+        # Draw traffic light semaphore in center of frame - bigger and positioned lower
+        frame_height, frame_width = annotated_frame.shape[:2]
+        center_x = frame_width // 2
+        semaphore_y = 300  # Moved down further from 200 to 300
+        
+        # Map safety status to traffic light state
+        if safety_status == SafetyStatus.SAFE:
+            traffic_light_state = "GREEN"
+        elif safety_status == SafetyStatus.NOT_SAFE:
+            traffic_light_state = "YELLOW"
+        else:  # DANGER
+            traffic_light_state = "RED"
+        
+        # Update the system's traffic light state to match safety
+        self.current_traffic_light_state = traffic_light_state
+        
+        # Traffic light background (black rectangle) - made bigger
+        light_width = 120  # Increased from 80 to 120
+        light_height = 330  # Increased from 220 to 330
+        cv2.rectangle(annotated_frame, 
+                     (center_x - light_width//2, semaphore_y), 
+                     (center_x + light_width//2, semaphore_y + light_height), 
+                     (30, 30, 30), -1)  # Dark gray background
+        
+        # Traffic light border
+        cv2.rectangle(annotated_frame, 
+                     (center_x - light_width//2, semaphore_y), 
+                     (center_x + light_width//2, semaphore_y + light_height), 
+                     (200, 200, 200), 4)  # Light gray border - thicker
+        
+        # Light positions - bigger spacing and radius
+        light_radius = 35  # Increased from 25 to 35
+        red_pos = (center_x, semaphore_y + 60)    # Adjusted for bigger size
+        yellow_pos = (center_x, semaphore_y + 165) # Adjusted for bigger size
+        green_pos = (center_x, semaphore_y + 270)  # Adjusted for bigger size
+        
+        # Draw all lights (dim when not active)
+        # Red light
+        red_color = (0, 0, 255) if traffic_light_state == "RED" else (50, 0, 0)
+        cv2.circle(annotated_frame, red_pos, light_radius, red_color, -1)
+        cv2.circle(annotated_frame, red_pos, light_radius, (100, 100, 100), 3)
+        
+        # Yellow light
+        yellow_color = (0, 255, 255) if traffic_light_state == "YELLOW" else (50, 50, 0)
+        cv2.circle(annotated_frame, yellow_pos, light_radius, yellow_color, -1)
+        cv2.circle(annotated_frame, yellow_pos, light_radius, (100, 100, 100), 3)
+        
+        # Green light
+        green_color = (0, 255, 0) if traffic_light_state == "GREEN" else (0, 50, 0)
+        cv2.circle(annotated_frame, green_pos, light_radius, green_color, -1)
+        cv2.circle(annotated_frame, green_pos, light_radius, (100, 100, 100), 3)
+        
         # Create top-view visualization
         topview_img = self.homography.create_topview_visualization(
             pipeline_result['projected_detections'], 
