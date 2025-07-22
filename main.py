@@ -632,12 +632,9 @@ class SmartTrafficLightSystem:
                 # Get the actual dimensions of the combined frame
                 actual_height, actual_width = combined_frame.shape[:2]
                 
-                # Add FPS info to the combined frame with huge text
-                fps_value = 1/processing_time if processing_time > 0 else 0
-                cv2.putText(combined_frame, f"FPS: {fps_value:.1f}", 
-                           (actual_width-400, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
+                # Add frame counter to the combined frame
                 cv2.putText(combined_frame, f"Frame: {self.frame_count}", 
-                           (actual_width-400, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
+                           (actual_width-400, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
                 
                 # Print safety alerts (only for processed frames)
                 if pipeline_result is not None and frame_counter % frame_skip == 0:

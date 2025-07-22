@@ -845,12 +845,6 @@ class HomographyProjector:
                        (canvas_x + 15, canvas_y - 10), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             
-            # Add coordinate information near each vehicle
-            coord_text = f"({int(x)},{int(y)})"
-            cv2.putText(topview_img, coord_text, 
-                       (canvas_x + 15, canvas_y + 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-            
             # For vehicles, also show if they're in safety zone
             if class_name in ['car', 'truck', 'bus', 'motorcycle', 'bicycle']:
                 if self.safety_zone_configured:
@@ -860,41 +854,6 @@ class HomographyProjector:
                     cv2.putText(topview_img, zone_status, 
                                (canvas_x + 15, canvas_y + 25), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, zone_color, 1)
-        
-        # Add safety zone coordinate information at the top
-        if self.safety_zone_configured and len(self.safety_zone_top) == 2 and len(self.safety_zone_bottom) == 2:
-            # Display safety zone y-coordinates at different x positions
-            test_x_positions = [200, 300, 400, 500]
-            y_offset = 160
-            
-            cv2.putText(topview_img, "Safety Zone Y-coords at different X:", 
-                       (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
-            
-            for i, test_x in enumerate(test_x_positions):
-                # Calculate y-coordinates of safety lines at this x position
-                x1_top, y1_top = self.safety_zone_top[0]
-                x2_top, y2_top = self.safety_zone_top[1]
-                x1_bottom, y1_bottom = self.safety_zone_bottom[0]
-                x2_bottom, y2_bottom = self.safety_zone_bottom[1]
-                
-                # Calculate y-coordinate on top line
-                if x2_top != x1_top:
-                    m_top = (y2_top - y1_top) / (x2_top - x1_top)
-                    y_top_at_x = m_top * (test_x - x1_top) + y1_top
-                else:
-                    y_top_at_x = y1_top
-                
-                # Calculate y-coordinate on bottom line
-                if x2_bottom != x1_bottom:
-                    m_bottom = (y2_bottom - y1_bottom) / (x2_bottom - x1_bottom)
-                    y_bottom_at_x = m_bottom * (test_x - x1_bottom) + y1_bottom
-                else:
-                    y_bottom_at_x = y1_bottom
-                
-                zone_text = f"X{test_x}: {int(min(y_top_at_x, y_bottom_at_x))}-{int(max(y_top_at_x, y_bottom_at_x))}"
-                cv2.putText(topview_img, zone_text, 
-                           (20 + i * 150, y_offset + 25), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         
         # Add title and info
         cv2.putText(topview_img, "Top View (Homography)", 
